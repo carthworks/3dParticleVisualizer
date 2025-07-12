@@ -85,6 +85,11 @@ let cursorTrail = [];
 let maxTrailLength = 15;
 let cursorStar = null;
 
+// Auto-change variables
+let autoChangeTimer = 0;
+let autoChangeInterval = 4000; // Change every 4 seconds
+let lastChangeTime = 0;
+
 // Glowing particle shader
 const glowVertexShader = `
   attribute float size;
@@ -151,8 +156,22 @@ function init() {
 
   controls = {
     update: function() {
+      // Mouse controls
       camera.position.x += (targetRotationY * 800 - camera.position.x) * 0.05;
       camera.position.y += (-targetRotationX * 800 - camera.position.y) * 0.05;
+
+      // Add automatic camera movement when mouse is idle
+      if (Math.abs(targetRotationX) < 0.01 && Math.abs(targetRotationY) < 0.01) {
+        // Auto-orbit camera
+        const autoOrbitX = Math.sin(time * 0.3) * 400;
+        const autoOrbitY = Math.cos(time * 0.2) * 200;
+        const autoOrbitZ = Math.sin(time * 0.4) * 300 + 800;
+
+        camera.position.x += (autoOrbitX - camera.position.x) * 0.01;
+        camera.position.y += (autoOrbitY - camera.position.y) * 0.01;
+        camera.position.z += (autoOrbitZ - camera.position.z) * 0.01;
+      }
+
       camera.lookAt(scene.position);
     }
   };
@@ -486,9 +505,19 @@ function updateParticleColors() {
     // Much brighter color variation and pulsing
     const variation = Math.sin(time * 2 + i * 0.01) * 0.5 + 1.5; // Brighter base
     const brightness = Math.sin(time * 3 + i * 0.02) * 0.3 + 1.8; // Extra brightness
-    colorArray[i] = currentColor.r * variation * brightness;
-    colorArray[i + 1] = currentColor.g * variation * brightness;
-    colorArray[i + 2] = currentColor.b * variation * brightness;
+
+    // Add rainbow effect occasionally
+    const rainbowEffect = Math.sin(time * 0.5) > 0.7 ? Math.sin(time * 4 + i * 0.1) * 0.3 + 1.0 : 1.0;
+
+    // Dynamic color shifting
+    const colorShift = Math.sin(time * 1.5) * 0.2;
+    const r = Math.min(2.0, currentColor.r * variation * brightness * rainbowEffect + colorShift);
+    const g = Math.min(2.0, currentColor.g * variation * brightness * rainbowEffect);
+    const b = Math.min(2.0, currentColor.b * variation * brightness * rainbowEffect - colorShift);
+
+    colorArray[i] = r;
+    colorArray[i + 1] = g;
+    colorArray[i + 2] = b;
   }
 
   particleSystem.geometry.attributes.customColor.needsUpdate = true;
@@ -513,6 +542,43 @@ function cycleVisuals() {
   }
 }
 
+function autoChangeVisuals() {
+  // Randomly choose between color change or formation change
+  const changeType = Math.random();
+
+  if (changeType < 0.6) {
+    // 60% chance: Change color
+    currentColorIndex = (currentColorIndex + 1) % colors.length;
+
+    // Update shader uniform
+    if (particleSystem && particleSystem.material.uniforms) {
+      particleSystem.material.uniforms.color.value.setHex(colors[currentColorIndex]);
+    }
+
+    console.log(`Auto-changed to color: ${colors[currentColorIndex].toString(16)}`);
+  } else {
+    // 40% chance: Change formation
+    currentFormationIndex = (currentFormationIndex + 1) % formations.length;
+    setFormation(formations[currentFormationIndex]);
+
+    // Reset text points when cycling formations
+    if (formations[currentFormationIndex] === 'text') {
+      textPoints = [];
+    }
+
+    console.log(`Auto-changed to formation: ${formations[currentFormationIndex]}`);
+  }
+
+  // Occasionally change both for dramatic effect
+  if (Math.random() < 0.15) {
+    currentColorIndex = Math.floor(Math.random() * colors.length);
+    if (particleSystem && particleSystem.material.uniforms) {
+      particleSystem.material.uniforms.color.value.setHex(colors[currentColorIndex]);
+    }
+    console.log('Dramatic change: Both color and formation!');
+  }
+}
+
 function onWindowResize() {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
@@ -523,6 +589,13 @@ function animate() {
   requestAnimationFrame(animate);
 
   time += 0.016; // Roughly 60fps
+
+  // Auto-change graphics every few seconds
+  autoChangeTimer += 16; // Add milliseconds
+  if (autoChangeTimer >= autoChangeInterval) {
+    autoChangeVisuals();
+    autoChangeTimer = 0;
+  }
 
   // Update shader time uniform for glow effects
   if (particleSystem && particleSystem.material.uniforms) {
@@ -540,6 +613,9 @@ function animate() {
   // Add subtle rotation to particle system
   if (particleSystem) {
     particleSystem.rotation.y += 0.002;
+    // Add some dynamic movement
+    particleSystem.rotation.x = Math.sin(time * 0.5) * 0.1;
+    particleSystem.rotation.z = Math.cos(time * 0.3) * 0.05;
   }
 
   // Update cursor trail
