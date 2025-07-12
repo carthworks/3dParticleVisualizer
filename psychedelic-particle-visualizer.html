@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Psychedelic Particle Visualizer</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: #000;
+            overflow: hidden;
+            font-family: Arial, sans-serif;
+        }
+        
+        canvas {
+            display: block;
+            background: radial-gradient(circle at center, #1a0033, #000);
+        }
+        
+        .controls {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: #fff;
+            z-index: 100;
+            background: rgba(0,0,0,0.7);
+            padding: 15px;
+            border-radius: 10px;
+            backdrop-filter: blur(10px);
+        }
+        
+        .control-group {
+            margin-bottom: 10px;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-size: 12px;
+        }
+        
+        input[type="range"] {
+            width: 150px;
+        }
+        
+        button {
+            background: linear-gradient(45deg, #ff006e, #8338ec);
+            border: none;
+            color: white;
+            padding: 8px 16px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        
+        button:hover {
+            transform: scale(1.05);
+        }
+
+        .title-overlay {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 4rem;
+            font-weight: bold;
+            color: transparent;
+            background: linear-gradient(45deg, #ff006e, #8338ec, #3a86ff, #06ffa5);
+            background-size: 400% 400%;
+            -webkit-background-clip: text;
+            background-clip: text;
+            animation: gradientShift 3s ease-in-out infinite;
+            text-align: center;
+            pointer-events: none;
+            z-index: 50;
+            text-shadow: 0 0 30px rgba(255, 255, 255, 0.5);
+            opacity: 0;
+            transition: opacity 2s ease-in-out;
+        }
+
+        .title-overlay.visible {
+            opacity: 1;
+        }
+
+        @keyframes gradientShift {
+            0%, 100% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+        }
+
+        @media (max-width: 768px) {
+            .title-overlay {
+                font-size: 2.5rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+
+    <div class="title-overlay" id="titleOverlay">
+        PSYCHEDELIC DREAMS
+    </div>
+
+    <div class="controls">
+        <div class="control-group">
+            <label>Particle Count: <span id="countValue">500</span></label>
+            <input type="range" id="particleCount" min="100" max="2000" value="500">
+        </div>
+        <div class="control-group">
+            <label>Speed: <span id="speedValue">1</span></label>
+            <input type="range" id="speed" min="0.1" max="5" step="0.1" value="1">
+        </div>
+        <div class="control-group">
+            <label>Psychedelic Intensity: <span id="intensityValue">3</span></label>
+            <input type="range" id="intensity" min="1" max="10" value="3">
+        </div>
+        <div class="control-group">
+            <button onclick="togglePause()">Pause/Resume</button>
+            <button onclick="resetEffect()">Reset</button>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        
+        let width, height;
+        let particles = [];
+        let time = 0;
+        let isPaused = false;
+
+        // Title array and management
+        const titleArray = [
+      
+        ];
+
+        let currentTitleIndex = 0;
+        let titleTimer = 0;
+        let titleDisplayDuration = 180; // frames (3 seconds at 60fps)
+        let titleFadeDuration = 60; // frames (1 second at 60fps)
+        
+        // Control elements
+        const particleCountSlider = document.getElementById('particleCount');
+        const speedSlider = document.getElementById('speed');
+        const intensitySlider = document.getElementById('intensity');
+        
+        // Settings
+        let settings = {
+            particleCount: 500,
+            speed: 1,
+            intensity: 3
+        };
+        
+        function resizeCanvas() {
+            width = canvas.width = window.innerWidth;
+            height = canvas.height = window.innerHeight;
+        }
+        
+        class Particle {
+            constructor() {
+                this.reset();
+                this.age = Math.random() * 100;
+            }
+            
+            reset() {
+                this.x = Math.random() * width;
+                this.y = Math.random() * height;
+                this.vx = (Math.random() - 0.5) * 2;
+                this.vy = (Math.random() - 0.5) * 2;
+                this.size = Math.random() * 3 + 1;
+                this.hue = Math.random() * 360;
+                this.life = 1;
+                this.decay = Math.random() * 0.02 + 0.005;
+                this.angle = Math.random() * Math.PI * 2;
+                this.angleSpeed = (Math.random() - 0.5) * 0.1;
+            }
+            
+            update() {
+                this.age += settings.speed;
+                
+                // Psychedelic movement patterns
+                const waveX = Math.sin(this.age * 0.02 + this.angle) * settings.intensity;
+                const waveY = Math.cos(this.age * 0.03 + this.angle) * settings.intensity;
+                
+                this.x += this.vx * settings.speed + waveX;
+                this.y += this.vy * settings.speed + waveY;
+                
+                // Spiral motion
+                this.angle += this.angleSpeed * settings.speed;
+                const spiralRadius = Math.sin(this.age * 0.01) * 50;
+                this.x += Math.cos(this.angle) * spiralRadius * 0.1;
+                this.y += Math.sin(this.angle) * spiralRadius * 0.1;
+                
+                // Color cycling
+                this.hue += settings.speed * 2;
+                if (this.hue > 360) this.hue = 0;
+                
+                // Life cycle
+                this.life -= this.decay * settings.speed;
+                
+                // Wrap around screen
+                if (this.x < 0) this.x = width;
+                if (this.x > width) this.x = 0;
+                if (this.y < 0) this.y = height;
+                if (this.y > height) this.y = 0;
+                
+                // Reset if dead
+                if (this.life <= 0) {
+                    this.reset();
+                }
+            }
+            
+            draw() {
+                const alpha = this.life;
+                const size = this.size * (1 + Math.sin(this.age * 0.1) * 0.5);
+                
+                // Main particle
+                ctx.save();
+                ctx.globalAlpha = alpha;
+                ctx.fillStyle = `hsl(${this.hue}, 100%, 50%)`;
+                ctx.shadowBlur = 20;
+                ctx.shadowColor = `hsl(${this.hue}, 100%, 50%)`;
+                
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, size, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // Psychedelic trail effect
+                ctx.globalAlpha = alpha * 0.3;
+                ctx.fillStyle = `hsl(${(this.hue + 180) % 360}, 100%, 70%)`;
+                ctx.beginPath();
+                ctx.arc(this.x - this.vx * 5, this.y - this.vy * 5, size * 0.7, 0, Math.PI * 2);
+                ctx.fill();
+                
+                ctx.restore();
+            }
+        }
+        
+        function initParticles() {
+            particles = [];
+            for (let i = 0; i < settings.particleCount; i++) {
+                particles.push(new Particle());
+            }
+        }
+        
+        function drawBackground() {
+            // Psychedelic background effect
+            const gradient = ctx.createRadialGradient(
+                width/2 + Math.sin(time * 0.01) * 100,
+                height/2 + Math.cos(time * 0.01) * 100,
+                0,
+                width/2,
+                height/2,
+                Math.max(width, height)
+            );
+            
+            const hue1 = (time * 0.5) % 360;
+            const hue2 = (time * 0.3 + 120) % 360;
+            const hue3 = (time * 0.7 + 240) % 360;
+            
+            gradient.addColorStop(0, `hsla(${hue1}, 50%, 10%, 0.1)`);
+            gradient.addColorStop(0.5, `hsla(${hue2}, 50%, 5%, 0.05)`);
+            gradient.addColorStop(1, `hsla(${hue3}, 50%, 2%, 0.02)`);
+            
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, 0, width, height);
+        }
+        
+        function updateTitle() {
+            if (!isPaused) {
+                titleTimer++;
+
+                const titleElement = document.getElementById('titleOverlay');
+                const totalCycleDuration = titleDisplayDuration + titleFadeDuration * 2;
+
+                if (titleTimer >= totalCycleDuration) {
+                    // Move to next title
+                    currentTitleIndex = (currentTitleIndex + 1) % titleArray.length;
+                    titleElement.textContent = titleArray[currentTitleIndex];
+                    titleTimer = 0;
+                }
+
+                // Calculate fade state
+                if (titleTimer < titleFadeDuration) {
+                    // Fade in
+                    titleElement.classList.add('visible');
+                } else if (titleTimer > titleDisplayDuration + titleFadeDuration) {
+                    // Fade out
+                    titleElement.classList.remove('visible');
+                } else {
+                    // Fully visible
+                    titleElement.classList.add('visible');
+                }
+            }
+        }
+
+        function animate() {
+            if (!isPaused) {
+                time++;
+
+                // Update title animation
+                updateTitle();
+
+                // Fade effect instead of clear
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.1)';
+                ctx.fillRect(0, 0, width, height);
+
+                drawBackground();
+
+                // Update and draw particles
+                particles.forEach(particle => {
+                    particle.update();
+                    particle.draw();
+                });
+
+                // Draw connecting lines for psychedelic effect
+                drawConnections();
+            }
+
+            requestAnimationFrame(animate);
+        }
+        
+        function drawConnections() {
+            ctx.save();
+            ctx.globalAlpha = 0.1;
+            
+            for (let i = 0; i < particles.length; i += 5) {
+                for (let j = i + 1; j < particles.length; j += 5) {
+                    const dx = particles[i].x - particles[j].x;
+                    const dy = particles[i].y - particles[j].y;
+                    const distance = Math.sqrt(dx * dx + dy * dy);
+                    
+                    if (distance < 100) {
+                        const hue = (particles[i].hue + particles[j].hue) / 2;
+                        ctx.strokeStyle = `hsl(${hue}, 100%, 50%)`;
+                        ctx.lineWidth = (100 - distance) / 100;
+                        
+                        ctx.beginPath();
+                        ctx.moveTo(particles[i].x, particles[i].y);
+                        ctx.lineTo(particles[j].x, particles[j].y);
+                        ctx.stroke();
+                    }
+                }
+            }
+            
+            ctx.restore();
+        }
+        
+        // Control functions
+        function updateControls() {
+            document.getElementById('countValue').textContent = settings.particleCount;
+            document.getElementById('speedValue').textContent = settings.speed;
+            document.getElementById('intensityValue').textContent = settings.intensity;
+        }
+        
+        function togglePause() {
+            isPaused = !isPaused;
+        }
+        
+        function resetEffect() {
+            time = 0;
+            titleTimer = 0;
+            currentTitleIndex = 0;
+            const titleElement = document.getElementById('titleOverlay');
+            titleElement.textContent = titleArray[currentTitleIndex];
+            titleElement.classList.add('visible');
+            initParticles();
+        }
+        
+        // Event listeners
+        particleCountSlider.addEventListener('input', (e) => {
+            settings.particleCount = parseInt(e.target.value);
+            initParticles();
+            updateControls();
+        });
+        
+        speedSlider.addEventListener('input', (e) => {
+            settings.speed = parseFloat(e.target.value);
+            updateControls();
+        });
+        
+        intensitySlider.addEventListener('input', (e) => {
+            settings.intensity = parseInt(e.target.value);
+            updateControls();
+        });
+        
+        window.addEventListener('resize', resizeCanvas);
+        
+        // Initialize
+        resizeCanvas();
+        initParticles();
+        updateControls();
+        animate();
+    </script>
+</body>
+</html>

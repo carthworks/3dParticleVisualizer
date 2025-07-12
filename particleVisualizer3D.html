@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>3D Particle Visualizer with three.js</title>
+<style>
+  body {
+    margin: 0;
+    overflow: hidden;
+    background: #000;
+    cursor: none; /* Hide default cursor */
+  }
+  canvas { display: block; }
+
+  /* Custom sparkling star cursor */
+  .cursor-star {
+    position: fixed;
+    width: 20px;
+    height: 20px;
+    pointer-events: none;
+    z-index: 9999;
+    transition: transform 0.1s ease-out;
+  }
+
+  .cursor-trail {
+    position: fixed;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    pointer-events: none;
+    z-index: 9998;
+    background: radial-gradient(circle, rgba(255,255,255,0.8) 0%, rgba(255,255,255,0) 70%);
+    box-shadow: 0 0 10px rgba(255,255,255,0.6);
+  }
+
+  @keyframes sparkle {
+    0% { transform: scale(1) rotate(0deg); opacity: 1; }
+    50% { transform: scale(1.2) rotate(180deg); opacity: 0.8; }
+    100% { transform: scale(1) rotate(360deg); opacity: 1; }
+  }
+
+  .cursor-star {
+    animation: sparkle 1s infinite;
+  }
+</style>
+</head>
+<body>
+<script src="https://unpkg.com/three@0.160.0/build/three.min.js"></script>
+<script>
+// Wait for THREE to be available and then initialize
+function waitForTHREE() {
+  if (typeof THREE !== 'undefined') {
+    console.log('THREE.js loaded successfully');
+    console.log('Using custom 3D text pattern for optimal performance');
+    initApp();
+  } else {
+    console.log('Waiting for THREE.js to load...');
+    setTimeout(waitForTHREE, 100);
+  }
+}
+
+// Start checking for THREE.js
+waitForTHREE();
+
+function initApp() {
+
+let scene, camera, renderer, controls;
+let particleSystem, particles;
+let colors = [0xff3c38, 0xff8c42, 0xfff275, 0x34a853, 0x4285f4, 0xaa00ff];
+let currentColorIndex = 0;
+let formations = ['sphere', 'spiral', 'cube', 'text', 'wave', 'random'];
+let currentFormationIndex = 0;
+let targetPositions = [];
+let currentPositions = [];
+let transitionSpeed = 0.02;
+let font = null;
+let textMeshes = [];
+let time = 0;
+let isTransitioning = false;
+let textPoints = [];
+
+// Cursor trail variables
+let cursorTrail = [];
+let maxTrailLength = 15;
+let cursorStar = null;
+
+// Glowing particle shader
+const glowVertexShader = `
+  attribute float size;
+  attribute vec3 customColor;
+  varying vec3 vColor;
+  varying float vAlpha;
+
+  void main() {
+    vColor = customColor;
+    vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+    gl_PointSize = size * (300.0 / -mvPosition.z);
+    gl_Position = projectionMatrix * mvPosition;
+
+    // Calculate alpha based on distance for glow effect
+    vAlpha = 1.0 - (length(mvPosition.xyz) / 1000.0);
+    vAlpha = clamp(vAlpha, 0.3, 1.0);
+  }
+`;
+
+const glowFragmentShader = `
+  uniform vec3 color;
+  uniform sampler2D pointTexture;
+  uniform float time;
+  varying vec3 vColor;
+  varying float vAlpha;
+
+  void main() {
+    vec2 center = gl_PointCoord - vec2(0.5);
+    float dist = length(center);
+
+    // Create much brighter glow effect
+    float glow = 1.0 - smoothstep(0.0, 0.6, dist);
+    float innerGlow = 1.0 - smoothstep(0.0, 0.3, dist);
+    float outerGlow = 1.0 - smoothstep(0.0, 0.8, dist);
+
+    // Stronger pulsing effect
+    float pulse = sin(time * 2.0) * 0.4 + 1.2;
+
+    // Much brighter final color with multiple glow layers
+    vec3 finalColor = vColor * (glow * 3.0 + innerGlow * 5.0 + outerGlow * 2.0) * pulse;
+    float alpha = (glow + innerGlow * 0.8) * vAlpha * pulse;
+
+    gl_FragColor = vec4(finalColor, alpha);
+  }
+`;
+
+// Initialize the application after shaders are defined
+init();
+animate();
+initCursor();
+
+function init() {
+  scene = new THREE.Scene();
+  camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 1, 4000);
+  camera.position.z = 800;
+
+  renderer = new THREE.WebGLRenderer({antialias:true});
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  document.body.appendChild(renderer.domElement);
+
+  // Simple mouse controls (since OrbitControls might not be available)
+  let mouseX = 0, mouseY = 0;
+  let targetRotationX = 0, targetRotationY = 0;
+
+  controls = {
+    update: function() {
+      camera.position.x += (targetRotationY * 800 - camera.position.x) * 0.05;
+      camera.position.y += (-targetRotationX * 800 - camera.position.y) * 0.05;
+      camera.lookAt(scene.position);
+    }
+  };
+
+  // Brighter ambient lighting
+  let ambient = new THREE.AmbientLight(0xffffff, 1.2);
+  scene.add(ambient);
+  let directional = new THREE.DirectionalLight(0xffffff, 1.5);
+  directional.position.set(0, 1, 1);
+  scene.add(directional);
+
+  // Add additional bright lights for better visibility
+  let light1 = new THREE.PointLight(0xffffff, 2.0, 2000);
+  light1.position.set(500, 500, 500);
+  scene.add(light1);
+
+  let light2 = new THREE.PointLight(0xffffff, 2.0, 2000);
+  light2.position.set(-500, -500, 500);
+  scene.add(light2);
+
+  createParticles();
+
+  window.addEventListener('resize', onWindowResize, false);
+  window.addEventListener('click', cycleVisuals, false);
+}
+
+function initCursor() {
+  // Create the sparkling star cursor
+  cursorStar = document.createElement('div');
+  cursorStar.className = 'cursor-star';
+  cursorStar.innerHTML = '.';
+  cursorStar.style.fontSize = '20px';
+  cursorStar.style.filter = 'drop-shadow(0 0 10px rgba(255,255,255,0.8))';
+  document.body.appendChild(cursorStar);
+
+  // Mouse move event for cursor and trail
+  document.addEventListener('mousemove', function(e) {
+    // Update star position
+    cursorStar.style.left = (e.clientX - 10) + 'px';
+    cursorStar.style.top = (e.clientY - 10) + 'px';
+
+    // Add trail point
+    addTrailPoint(e.clientX, e.clientY);
+
+    // Update existing mouse controls
+    mouseX = (e.clientX - window.innerWidth / 2) * 0.001;
+    mouseY = (e.clientY - window.innerHeight / 2) * 0.001;
+    targetRotationX = mouseY;
+    targetRotationY = mouseX;
+  });
+}
+
+function addTrailPoint(x, y) {
+  // Create trail element
+  const trail = document.createElement('div');
+  trail.className = 'cursor-trail';
+  trail.style.left = (x - 4) + 'px';
+  trail.style.top = (y - 4) + 'px';
+
+  // Random sparkle colors
+  const colors = ['#ffffff', '#ffff00', '#ff69b4', '#00ffff', '#ff4500', '#9370db'];
+  const randomColor = colors[Math.floor(Math.random() * colors.length)];
+  trail.style.background = `radial-gradient(circle, ${randomColor} 0%, transparent 70%)`;
+  trail.style.boxShadow = `0 0 15px ${randomColor}`;
+
+  document.body.appendChild(trail);
+
+  // Add to trail array
+  cursorTrail.push({
+    element: trail,
+    life: 1.0,
+    x: x,
+    y: y
+  });
+
+  // Remove excess trail points
+  if (cursorTrail.length > maxTrailLength) {
+    const oldTrail = cursorTrail.shift();
+    if (oldTrail.element.parentNode) {
+      oldTrail.element.parentNode.removeChild(oldTrail.element);
+    }
+  }
+}
+
+function updateCursorTrail() {
+  for (let i = cursorTrail.length - 1; i >= 0; i--) {
+    const trail = cursorTrail[i];
+    trail.life -= 0.05;
+
+    if (trail.life <= 0) {
+      // Remove dead trail
+      if (trail.element.parentNode) {
+        trail.element.parentNode.removeChild(trail.element);
+      }
+      cursorTrail.splice(i, 1);
+    } else {
+      // Update trail appearance
+      const scale = trail.life;
+      const opacity = trail.life;
+      trail.element.style.transform = `scale(${scale})`;
+      trail.element.style.opacity = opacity;
+    }
+  }
+}
+
+
+
+function createParticles() {
+  if (particleSystem) scene.remove(particleSystem);
+
+  let geometry = new THREE.BufferGeometry();
+  let count = 4000;
+  let positions = new Float32Array(count * 3);
+  let sizes = new Float32Array(count);
+  let customColors = new Float32Array(count * 3);
+
+  for (let i = 0; i < count; i++) {
+    positions[i*3] = (Math.random()-0.5)*800;
+    positions[i*3+1] = (Math.random()-0.5)*800;
+    positions[i*3+2] = (Math.random()-0.5)*800;
+
+    sizes[i] = Math.random() * 15 + 8; // Much larger particles
+
+    // Set initial colors
+    const color = new THREE.Color(colors[currentColorIndex]);
+    customColors[i*3] = color.r;
+    customColors[i*3+1] = color.g;
+    customColors[i*3+2] = color.b;
+  }
+
+  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  geometry.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
+  geometry.setAttribute('customColor', new THREE.BufferAttribute(customColors, 3));
+
+  // Create custom shader material for bright glow effect
+  let material = new THREE.ShaderMaterial({
+    uniforms: {
+      color: { value: new THREE.Color(colors[currentColorIndex]) },
+      time: { value: 0.0 }
+    },
+    vertexShader: glowVertexShader,
+    fragmentShader: glowFragmentShader,
+    blending: THREE.AdditiveBlending,
+    depthTest: false,
+    transparent: true,
+    opacity: 1.0
+  });
+
+  particleSystem = new THREE.Points(geometry, material);
+  scene.add(particleSystem);
+
+  particles = geometry.attributes.position.array;
+
+  // Initialize position arrays for smooth transitions
+  currentPositions = new Float32Array(particles.length);
+  targetPositions = new Float32Array(particles.length);
+  for (let i = 0; i < particles.length; i++) {
+    currentPositions[i] = particles[i];
+    targetPositions[i] = particles[i];
+  }
+
+  setFormation(formations[currentFormationIndex]);
+}
+
+function createTextPoints(text) {
+  // Always use our custom 3D text pattern - it's more reliable and looks great!
+  return createCustom3DTextPoints(text);
+}
+
+function createCustom3DTextPoints(text) {
+  // Create an impressive "3D" text pattern manually
+  const points = [];
+
+  // Letter "3" - More detailed curves
+  for (let i = 0; i < 80; i++) {
+    const t = i / 80;
+    // Top curve
+    if (t < 0.33) {
+      const angle = t * 3 * Math.PI;
+      points.push({
+        x: -120 + Math.cos(angle) * 60,
+        y: 60 + Math.sin(angle) * 30,
+        z: Math.sin(angle * 2) * 15
+      });
+    }
+    // Middle curve
+    else if (t < 0.66) {
+      const angle = (t - 0.33) * 3 * Math.PI;
+      points.push({
+        x: -120 + Math.cos(angle) * 45,
+        y: Math.sin(angle) * 20,
+        z: Math.cos(angle * 3) * 10
+      });
+    }
+    // Bottom curve
+    else {
+      const angle = (t - 0.66) * 3 * Math.PI;
+      points.push({
+        x: -120 + Math.cos(angle) * 60,
+        y: -60 + Math.sin(angle) * 30,
+        z: Math.sin(angle * 2) * 15
+      });
+    }
+  }
+
+  // Letter "D" - Semicircle with depth
+  for (let i = 0; i < 100; i++) {
+    const t = i / 100;
+    const angle = t * Math.PI;
+    const radius = 70;
+    points.push({
+      x: 80 + Math.cos(angle) * radius,
+      y: Math.sin(angle) * radius,
+      z: Math.sin(t * Math.PI * 4) * 20
+    });
+
+    // Add vertical lines for the "D"
+    if (i % 10 === 0) {
+      for (let j = 0; j < 5; j++) {
+        points.push({
+          x: 80,
+          y: -radius + (j / 4) * radius * 2,
+          z: Math.sin(j) * 10
+        });
+      }
+    }
+  }
+
+  // Add some sparkle points around the text
+  for (let i = 0; i < 50; i++) {
+    points.push({
+      x: (Math.random() - 0.5) * 400,
+      y: (Math.random() - 0.5) * 200,
+      z: (Math.random() - 0.5) * 100
+    });
+  }
+
+  console.log(`Created custom "3D" text with ${points.length} points`);
+  return points;
+}
+
+function setFormation(type) {
+  let count = particles.length/3;
+  let radius = 300;
+
+  // Store target positions for smooth transitions
+  for (let i = 0; i < count; i++) {
+    let x, y, z;
+    switch(type) {
+      case 'sphere':
+        let phi = Math.acos(-1 + (2 * i) / count);
+        let theta = Math.sqrt(count * Math.PI) * phi;
+        x = radius * Math.cos(theta) * Math.sin(phi);
+        y = radius * Math.sin(theta) * Math.sin(phi);
+        z = radius * Math.cos(phi);
+        break;
+      case 'spiral':
+        let angle = 0.1 * i;
+        x = Math.cos(angle) * angle;
+        y = Math.sin(angle) * angle;
+        z = (i - count/2) * 0.5;
+        break;
+      case 'cube':
+        x = (Math.random()-0.5)*radius*2;
+        y = (Math.random()-0.5)*radius*2;
+        z = (Math.random()-0.5)*radius*2;
+        break;
+      case 'text':
+        if (textPoints.length === 0) {
+          textPoints = createTextPoints('3D');
+        }
+        let pointIndex = i % textPoints.length;
+        x = textPoints[pointIndex].x + (Math.random()-0.5)*20;
+        y = textPoints[pointIndex].y + (Math.random()-0.5)*20;
+        z = textPoints[pointIndex].z + (Math.random()-0.5)*20;
+        break;
+      case 'wave':
+        let waveX = (i % 100) * 8 - 400;
+        let waveZ = Math.floor(i / 100) * 8 - 400;
+        x = waveX;
+        y = Math.sin(waveX * 0.01) * Math.cos(waveZ * 0.01) * 100;
+        z = waveZ;
+        break;
+      case 'random':
+        x = (Math.random()-0.5)*800;
+        y = (Math.random()-0.5)*800;
+        z = (Math.random()-0.5)*800;
+        break;
+    }
+    targetPositions[i*3] = x;
+    targetPositions[i*3+1] = y;
+    targetPositions[i*3+2] = z;
+  }
+
+  isTransitioning = true;
+}
+
+function updateParticleTransitions() {
+  if (!isTransitioning) return;
+
+  let allReached = true;
+  let count = particles.length;
+
+  for (let i = 0; i < count; i++) {
+    let current = currentPositions[i];
+    let target = targetPositions[i];
+    let diff = target - current;
+
+    if (Math.abs(diff) > 0.1) {
+      allReached = false;
+      currentPositions[i] += diff * transitionSpeed;
+      particles[i] = currentPositions[i];
+    } else {
+      particles[i] = target;
+      currentPositions[i] = target;
+    }
+  }
+
+  if (allReached) {
+    isTransitioning = false;
+  }
+
+  particleSystem.geometry.attributes.position.needsUpdate = true;
+}
+
+function updateParticleColors() {
+  const colorArray = particleSystem.geometry.attributes.customColor.array;
+  const currentColor = new THREE.Color(colors[currentColorIndex]);
+
+  for (let i = 0; i < colorArray.length; i += 3) {
+    // Much brighter color variation and pulsing
+    const variation = Math.sin(time * 2 + i * 0.01) * 0.5 + 1.5; // Brighter base
+    const brightness = Math.sin(time * 3 + i * 0.02) * 0.3 + 1.8; // Extra brightness
+    colorArray[i] = currentColor.r * variation * brightness;
+    colorArray[i + 1] = currentColor.g * variation * brightness;
+    colorArray[i + 2] = currentColor.b * variation * brightness;
+  }
+
+  particleSystem.geometry.attributes.customColor.needsUpdate = true;
+}
+
+function cycleVisuals() {
+  currentColorIndex = (currentColorIndex + 1) % colors.length;
+
+  // Update shader uniform
+  if (particleSystem.material.uniforms) {
+    particleSystem.material.uniforms.color.value.setHex(colors[currentColorIndex]);
+  }
+
+  if (currentColorIndex % colors.length === 0) {
+    currentFormationIndex = (currentFormationIndex + 1) % formations.length;
+    setFormation(formations[currentFormationIndex]);
+
+    // Reset text points when cycling formations
+    if (formations[currentFormationIndex] === 'text') {
+      textPoints = [];
+    }
+  }
+}
+
+function onWindowResize() {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+}
+
+function animate() {
+  requestAnimationFrame(animate);
+
+  time += 0.016; // Roughly 60fps
+
+  // Update shader time uniform for glow effects
+  if (particleSystem && particleSystem.material.uniforms) {
+    particleSystem.material.uniforms.time.value = time;
+  }
+
+  // Update particle transitions
+  updateParticleTransitions();
+
+  // Update particle colors for dynamic effects
+  if (particleSystem && particleSystem.geometry.attributes.customColor) {
+    updateParticleColors();
+  }
+
+  // Add subtle rotation to particle system
+  if (particleSystem) {
+    particleSystem.rotation.y += 0.002;
+  }
+
+  // Update cursor trail
+  updateCursorTrail();
+
+  controls.update();
+  renderer.render(scene, camera);
+}
+
+} // End of initApp()
+</script>
+</body>
+</html>

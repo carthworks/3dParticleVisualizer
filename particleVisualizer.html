@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Advanced Particle Cloud Visualizer with Formations</title>
+<style>
+  body, html {
+    margin: 0;
+    padding: 0;
+    background: #000;
+    overflow: hidden;
+    height: 100%;
+  }
+  canvas {
+    display: block;
+  }
+</style>
+</head>
+<body>
+<canvas id="particleCanvas"></canvas>
+<script>
+// Config
+const CONFIG = {
+  particleCount: 150,
+  speed: 1.5
+};
+
+const canvas = document.getElementById('particleCanvas');
+const ctx = canvas.getContext('2d');
+let width = canvas.width = window.innerWidth;
+let height = canvas.height = window.innerHeight;
+
+let shapes = ['circle', 'square', 'triangle', 'star', 'hexagon'];
+let currentShapeIndex = 0;
+
+let colors = ['#FF3C38', '#FF8C42', '#FFF275', '#34A853', '#4285F4', '#AA00FF'];
+let currentColorIndex = 0;
+
+let formations = ['scatter', 'circle', 'star', 'parabola'];
+let currentFormationIndex = 0;
+
+let particles = [];
+let mouse = { x: width / 2, y: height / 2 };
+
+// Initialize particles
+for (let i = 0; i < CONFIG.particleCount; i++) {
+  particles.push({
+    x: Math.random() * width,
+    y: Math.random() * height,
+    vx: (Math.random() - 0.5) * CONFIG.speed,
+    vy: (Math.random() - 0.5) * CONFIG.speed,
+    size: Math.random() * 4 + 2
+  });
+}
+
+window.addEventListener('resize', () => {
+  width = canvas.width = window.innerWidth;
+  height = canvas.height = window.innerHeight;
+  setFormation(formations[currentFormationIndex]);
+});
+
+canvas.addEventListener('click', () => {
+  currentShapeIndex = (currentShapeIndex + 1) % shapes.length;
+  currentColorIndex = (currentColorIndex + 1) % colors.length;
+
+  // On every second click, change formation
+  if (currentShapeIndex % shapes.length === 0) {
+    currentFormationIndex = (currentFormationIndex + 1) % formations.length;
+    setFormation(formations[currentFormationIndex]);
+  }
+});
+
+canvas.addEventListener('mousemove', e => {
+  mouse.x = e.clientX;
+  mouse.y = e.clientY;
+});
+
+// Formation setting
+function setFormation(type) {
+  const centerX = width / 2;
+  const centerY = height / 2;
+
+  switch (type) {
+    case 'scatter':
+      particles.forEach(p => {
+        p.tx = Math.random() * width;
+        p.ty = Math.random() * height;
+      });
+      break;
+
+    case 'circle':
+      particles.forEach((p, i) => {
+        let angle = (i / particles.length) * Math.PI * 2;
+        let radius = Math.min(width, height) / 3;
+        p.tx = centerX + radius * Math.cos(angle);
+        p.ty = centerY + radius * Math.sin(angle);
+      });
+      break;
+
+    case 'star':
+      particles.forEach((p, i) => {
+        let spikes = 5;
+        let step = Math.PI / spikes;
+        let radius = Math.min(width, height) / 3;
+        let innerRadius = radius / 2;
+        let angle = (i / particles.length) * Math.PI * 2 * spikes;
+        let r = i % 2 === 0 ? radius : innerRadius;
+        p.tx = centerX + Math.cos(angle) * r;
+        p.ty = centerY + Math.sin(angle) * r;
+      });
+      break;
+
+    case 'parabola':
+      particles.forEach((p, i) => {
+        let x = (i / particles.length - 0.5) * width * 0.8;
+        let y = 0.002 * x * x;
+        p.tx = centerX + x;
+        p.ty = centerY - y;
+      });
+      break;
+  }
+}
+
+// Draw helpers
+function drawParticle(p) {
+  ctx.fillStyle = colors[currentColorIndex];
+  ctx.beginPath();
+  switch (shapes[currentShapeIndex]) {
+    case 'circle':
+      ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+      break;
+    case 'square':
+      ctx.rect(p.x - p.size, p.y - p.size, p.size * 2, p.size * 2);
+      break;
+    case 'triangle':
+      ctx.moveTo(p.x, p.y - p.size);
+      ctx.lineTo(p.x - p.size, p.y + p.size);
+      ctx.lineTo(p.x + p.size, p.y + p.size);
+      ctx.closePath();
+      break;
+    case 'star':
+      drawStar(p.x, p.y, 5, p.size, p.size / 2);
+      break;
+    case 'hexagon':
+      drawPolygon(p.x, p.y, 6, p.size);
+      break;
+  }
+  ctx.fill();
+}
+
+function drawStar(cx, cy, spikes, outerRadius, innerRadius) {
+  let rot = Math.PI / 2 * 3;
+  let step = Math.PI / spikes;
+  ctx.moveTo(cx, cy - outerRadius);
+  for (let i = 0; i < spikes; i++) {
+    ctx.lineTo(cx + Math.cos(rot) * outerRadius, cy + Math.sin(rot) * outerRadius);
+    rot += step;
+    ctx.lineTo(cx + Math.cos(rot) * innerRadius, cy + Math.sin(rot) * innerRadius);
+    rot += step;
+  }
+  ctx.lineTo(cx, cy - outerRadius);
+  ctx.closePath();
+}
+
+function drawPolygon(cx, cy, sides, radius) {
+  let angle = (2 * Math.PI) / sides;
+  ctx.moveTo(cx + radius * Math.cos(0), cy + radius * Math.sin(0));
+  for (let i = 1; i <= sides; i++) {
+    ctx.lineTo(cx + radius * Math.cos(i * angle), cy + radius * Math.sin(i * angle));
+  }
+  ctx.closePath();
+}
+
+// Animate
+function animate() {
+  ctx.clearRect(0, 0, width, height);
+
+  for (let p of particles) {
+    if (p.tx !== undefined && p.ty !== undefined) {
+      // Smooth move toward target formation
+      p.x += (p.tx - p.x) * 0.02;
+      p.y += (p.ty - p.y) * 0.02;
+    } else {
+      // Scatter mode: move freely + slight mouse attraction
+      let dx = mouse.x - p.x;
+      let dy = mouse.y - p.y;
+      let dist = Math.max(Math.sqrt(dx * dx + dy * dy), 1);
+      let pull = 0.01;
+      p.vx += (dx / dist) * pull;
+      p.vy += (dy / dist) * pull;
+
+      p.x += p.vx;
+      p.y += p.vy;
+
+      // Bounce
+      if (p.x < 0 || p.x > width) p.vx *= -1;
+      if (p.y < 0 || p.y > height) p.vy *= -1;
+    }
+    drawParticle(p);
+  }
+
+  requestAnimationFrame(animate);
+}
+
+// Start
+setFormation(formations[currentFormationIndex]);
+animate();
+</script>
+</body>
+</html>
